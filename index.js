@@ -3,364 +3,245 @@
 /*
  ============================================================================
  Name        : GDAX Trading Bot
- Author      : Kenshiro
- Version     : 7.05
+ Author      : Kenshiro, ahaenggli
+ Version     : 8.00
  Copyright   : GNU General Public License (GPLv3)
  Description : Trading bot for the Coinbase Pro exchange
  ============================================================================
  */
 
-const APP_VERSION = "v7.05";
+const APP_VERSION = "v8.00";
 
 const GdaxModule = require('coinbase-pro');
 
+// .env Files are awesome
+const dotenv = require('dotenv');
+dotenv.config();
+
+// load environment vars or empty
 const PASSPHRASE = process.env.TRADING_BOT_PASSPHRASE || '';
 const KEY = process.env.TRADING_BOT_KEY || '';
 const SECRET = process.env.TRADING_BOT_SECRET || '';
 
 const GDAX_URI = 'https://api.pro.coinbase.com';
 
-const XTZ_BTC_CURRENCY_PAIR = 'XTZ-BTC';
-const ETH_BTC_CURRENCY_PAIR = 'ETH-BTC';
-
-const BITCOIN_TICKER = 'BTC';
-const TEZOS_TICKER = 'XTZ';
-const ETHEREUM_TICKER = 'ETH';
-
 const SLEEP_TIME = 30000;
 
-// The seed is the amount of coins that the program will trade continuously
-const SEED_XTZ_AMOUNT = 1.0;
-const SEED_ETH_AMOUNT = 1.0;
-
 // Profit percentage trading a seed
-const PROFIT_PERCENTAGE = 2.0; 
-
+const PROFIT_PERCENTAGE = 2.00; 
 const MINIMUM_BUY_PRICE_MULTIPLIER = 100.5 / 100.0;
-
 const SELL_PRICE_MULTIPLIER = (100.0 + PROFIT_PERCENTAGE) / 100.0;
 
-let askPriceTEZOS = null;
-let averagePriceTEZOS = null;
-let lastBuyOrderIdTEZOS = null;
-let lastBuyOrderPriceTEZOS = null;
+const CURRENCY_PAIRS = 
+{
+    LTC_BTC : {Name:'LTC-BTC',Rounding:6,SEED_AMOUNT:1.00},
+    ETH_BTC : {Name:'ETH-BTC',Rounding:5,SEED_AMOUNT:1.00},
+    //XLM_BTC : {Name:'XLM-BTC',Rounding:8,SEED_AMOUNT:100.00},
+    //EOS_BTC : {Name:'EOS-BTC',Rounding:6,SEED_AMOUNT:1.00},
+    //ZRX_BTC : {Name:'ZRX-BTC',Rounding:8,SEED_AMOUNT:10.00},
+    ETC_BTC : {Name:'ETC-BTC',Rounding:6,SEED_AMOUNT:1.00},
+    XTZ_BTC : {Name:'XTZ-BTC',Rounding:8,SEED_AMOUNT:1.00}
+};
 
-let askPriceETH = null;
-let averagePriceETH = null;
-let lastBuyOrderIdETH = null;
-let lastBuyOrderPriceETH = null;
-
-let btcAvailable = 0;
-let btcBalance = 0;
-
-let tezosAvailable = 0;
-let tezosBalance = 0;
-
-let ethAvailable = 0;
-let ethBalance = 0;
-
+const TICKERS = {};
+        
 let numberOfCyclesCompleted = 0;
-
 let estimatedProfit = 0;
-
 let authenticatedClient = null;
 let publicClient = null;
 
-// Callbacks
 
-const buyOrderCallbackTEZOS = (error, response, data) => 
-{
-    if (error)
-        return console.log(error);
+function sleep(milliseconds) {
+    return new Promise(resolve => setTimeout(resolve, milliseconds));
+ }
 
-    if ((data!=null) && (data.status==='pending'))
-		lastBuyOrderIdTEZOS = data.id;
-
-    return console.log(data);
-}
-
-const buyOrderCallbackETH = (error, response, data) => 
-{
-    if (error)
-        return console.log(error);
-
-    if ((data!=null) && (data.status==='pending'))
-		lastBuyOrderIdETH = data.id;
-
-    return console.log(data);
-}
-
-
-const sellOrderCallbackTEZOS = (error, response, data) => 
+ 
+const sellOrderCallbackGeneric = async(error, response, data) => 
 {
     if (error)
         return console.log(error);
 
     if ((data!=null) && (data.status==='pending'))
     {
-        estimatedProfit = estimatedProfit + SEED_XTZ_AMOUNT * (parseFloat(data.price) - lastBuyOrderPriceTEZOS);
-		averagePriceTEZOS = lastBuyOrderPriceTEZOS;          
-		lastBuyOrderPriceTEZOS = null;
-		lastBuyOrderIdTEZOS = null;
+        myProduct = data.product_id;
+        myKey = myProduct.replace('-','_');
+        var cur = myProduct.split('-')[0];
+        var btc = myProduct.split('-')[1];
+
+        estimatedProfit = estimatedProfit + CURRENCY_PAIRS[myKey]['SEED_AMOUNT'] * (parseFloat(data.price) - TICKERS[cur]['lastBuyOrderPrice']);
+		averagePriceTEZOS = TICKERS[cur]['lastBuyOrderPrice'];          
+        TICKERS[cur]['lastBuyOrderPrice'] = null;
+        TICKERS[cur]['lastBuyOrderId'] = null;
         numberOfCyclesCompleted++;
  	}
 
     return console.log(data);
 }
 
-const sellOrderCallbackETH = (error, response, data) => 
-{
-    if (error)
-        return console.log(error);
-
-    if ((data!=null) && (data.status==='pending'))
-    {
-        estimatedProfit = estimatedProfit + SEED_ETH_AMOUNT * (parseFloat(data.price) - lastBuyOrderPriceETH);
-        averagePriceETH = lastBuyOrderPriceETH;        
-        lastBuyOrderPriceETH = null;
-		lastBuyOrderIdETH = null;
-        numberOfCyclesCompleted++;
- 	}
-
-    return console.log(data);
-}
-
-const getProductTickerCallbackTEZOS = (error, response, data) => 
+const getFilledPriceCallbackGeneric = async(error, response, data) =>  
 {
 	if (error)
         return console.log(error);
 
-    if ((data!=null) && (data.ask!=null) && (data.time!=null))
-    {
-	    askPriceTEZOS = parseFloat(data.ask);
+	if ((Array.isArray(data)) && (data.length >= 1))
+	{
+        myProduct = data[0].product_id;
+        myKey = myProduct.replace('-','_');
         
-        if (averagePriceTEZOS===null)
-            console.log("[TEZOS TICKER] Now: " + askPriceTEZOS.toFixed(6) + " BTC, time: " + data.time);
-        else
-            console.log("[TEZOS TICKER] Now: " + askPriceTEZOS.toFixed(6) + " BTC, average: " + averagePriceTEZOS.toFixed(6) + " BTC, time: " + data.time);
+        var cur = myProduct.split('-')[0];
+        var btc = myProduct.split('-')[1];
+        
+        TICKERS[cur].lastBuyOrderPrice = null;
+		TICKERS[cur]['lastBuyOrderPrice'] = parseFloat(data[0].price);
 
-		const buyPrice = askPriceTEZOS * SEED_XTZ_AMOUNT;
-
-        if ((btcAvailable>=buyPrice) && (averagePriceTEZOS!=null) && (lastBuyOrderIdTEZOS===null))
-            placeBuyOrderTEZOS();
-        else if ((tezosAvailable>=SEED_XTZ_AMOUNT) && (lastBuyOrderIdTEZOS!=null))
-            placeSellOrderTEZOS();
-         
-        if (averagePriceTEZOS===null)
-            averagePriceTEZOS = askPriceTEZOS;
-        else
-            averagePriceTEZOS = (averagePriceTEZOS * 1000 + askPriceTEZOS) / 1001;
+		let highestPrice;
 	
-		setTimeout(()=>publicClient.getProductTicker(ETH_BTC_CURRENCY_PAIR, getProductTickerCallbackETH), 10000);
-    }
+		if (TICKERS[cur]['askPrice'] > TICKERS[cur]['lastBuyOrderPrice'])
+		    highestPrice = TICKERS[cur]['askPrice'];
+		else
+		    highestPrice = TICKERS[cur]['lastBuyOrderPrice'];
+
+		const sellPrice = highestPrice * SELL_PRICE_MULTIPLIER;
+		const sellSize = TICKERS[cur]['Available'] - 0.000000001;
+
+		const sellParams = 
+		{
+		    'price': sellPrice.toFixed(CURRENCY_PAIRS[myKey]['Rounding']),
+		    'size': sellSize.toFixed(4),
+		    'product_id': myProduct,
+		    'post_only': true,
+		};
+
+		console.log("");
+		console.log("\x1b[41m%s\x1b[0m", "[SELL ORDER <" + myKey + ">] Price: " + sellPrice.toFixed(CURRENCY_PAIRS[myKey]['Rounding']) + ", size: " + sellSize.toFixed(2) + ""); 
+
+		setTimeout(()=>authenticatedClient.sell(sellParams, sellOrderCallbackGeneric), 3000);
+	}
+
+	return; //console.log(data);
 }
 
-const getProductTickerCallbackETH= (error, response, data) => 
+async function placeGenericSellOrder(lastId, product_id)
+{
+    if(lastId !== undefined && lastId != null)
+      await authenticatedClient.getFills({ order_id: lastId }, getFilledPriceCallbackGeneric);
+    else await authenticatedClient.getFills({ product_id: product_id }, getFilledPriceCallbackGeneric);	
+}
+
+const buyOrderCallbackGeneric = async(error, response, data) => 
 {
 	if (error)
         return console.log(error);
 
-    if ((data!=null) && (data.ask!=null) && (data.time!=null))
-    {
-	    askPriceETH = parseFloat(data.ask);
-       
-        if (averagePriceETH==null)
-            console.log("\n[ETHER TICKER] Now: " + askPriceETH.toFixed(6) + " BTC, time: " + data.time);
-        else
-            console.log("\n[ETHER TICKER] Now: " + askPriceETH.toFixed(6) + " BTC, average: " + averagePriceETH.toFixed(6) + " BTC, time: " + data.time);
-		
-		const buyPrice = askPriceETH * SEED_ETH_AMOUNT;
+    if ((data != null) && (data.status === 'pending')){
 
-        if ((btcAvailable>=buyPrice) && (averagePriceETH!=null) && (lastBuyOrderIdETH===null))
-            placeBuyOrderETH();
-        else if ((ethAvailable>=SEED_ETH_AMOUNT) && (lastBuyOrderIdETH!=null))
-            placeSellOrderETH();
-         
-        if (averagePriceETH===null)
-            averagePriceETH = askPriceETH;
-        else
-            averagePriceETH = (averagePriceETH * 1000 + askPriceETH) / 1001;
+        var myTicker = data.product_id;
+        myTickerKey = myTicker.replace('-', '_');
+        var cur = myTicker.split('-')[0];
+        var btc = myTicker.split('-')[1];
+
+        console.log(data.id);
+        TICKERS[cur]['lastBuyOrderId'] = data.id;
+    }
+
+    return console.log(data);
+}
+
+async function placeGenericBuyOrder(cur_pair, cur_key) 
+{
+    var cur = cur_pair.split('-')[0];
+    var btc = cur_pair.split('-')[1];
+
+    const minimumBuyPrice = TICKERS[cur]['averagePrice'] * MINIMUM_BUY_PRICE_MULTIPLIER;
+
+    if (TICKERS[cur]['askPrice'] >= minimumBuyPrice)
+    {
+        const buySize = CURRENCY_PAIRS[cur_key]['SEED_AMOUNT'];
+
+        const buyParams = 
+	    {
+            'size': buySize.toFixed(CURRENCY_PAIRS[cur_key]['ROUNDING']),
+            'product_id': cur_pair,
+            'type': 'market'
+		};
+
+		console.log("");
+		console.log("\x1b[42m%s\x1b[0m", "[BUY ORDER] Size: " + buySize.toFixed(CURRENCY_PAIRS[cur_key]['ROUNDING']) + " "+cur);
+        
+        console.log(buyParams);
+        await authenticatedClient.buy(buyParams, buyOrderCallbackGeneric);
     }
 }
 
-const getAccountsCallback = (error, response, data) => 
+const getGenericProductTickerCallback = async (error, response, data) => 
+{ 
+	if (error)
+        return console.log(error);
+      
+    if ((data!=null) && (data.ask!=null) && (data.time!=null))
+    {
+        var myTicker = (response['request']['href']);
+        myTicker = myTicker.replace('https://api.pro.coinbase.com/products/', '');
+        myTicker = myTicker.replace('/ticker', '');
+        myTickerKey = myTicker.replace('-', '_');
+
+        var cur = myTicker.split('-')[0];
+        var btc = myTicker.split('-')[1];
+
+        // no trading possible... 
+        if(!TICKERS[cur]['trading_enabled']) return;
+        
+        // disabled trading with amount === 0
+        if(CURRENCY_PAIRS[myTickerKey]['SEED_AMOUNT'] === 0) return;
+
+        TICKERS[cur]['askPrice'] = parseFloat(data.ask);
+
+        if (TICKERS[cur]['averagePrice']===null)
+            console.log("["+cur+" TICKER] Now: " + TICKERS[cur]['askPrice'].toFixed(8) + ", time: " + data.time);
+        else
+            console.log("["+cur+" TICKER] Now: " + TICKERS[cur]['askPrice'].toFixed(8) + ", average: " + TICKERS[cur]['averagePrice'].toFixed(8) + ", time: " + data.time);
+                    
+		const buyPrice = TICKERS[cur]['askPrice'] * CURRENCY_PAIRS[myTickerKey]['SEED_AMOUNT']; 
+
+        if ((TICKERS[btc]['Available'] >= buyPrice) && (TICKERS[cur]['averagePrice'] != null) && TICKERS[cur]['Available'] <= 0)            
+            placeGenericBuyOrder(myTicker,myTickerKey);
+        else if ((TICKERS[cur]['Available'] >= CURRENCY_PAIRS[myTickerKey]['SEED_AMOUNT']))
+            placeGenericSellOrder(TICKERS[cur]['lastBuyOrderId'], myTicker);
+
+        if (TICKERS[cur]['averagePrice'] === null)
+        TICKERS[cur]['averagePrice'] = TICKERS[cur]['askPrice'];
+        else
+        TICKERS[cur]['averagePrice'] = (TICKERS[cur]['averagePrice'] * 1000 + TICKERS[cur]['askPrice']) / 1001;
+
+    }
+}
+
+const getAccountsCallback = async (error, response, data) => 
 {
     if (error)
         return console.log(error);
 
     if ((data!=null) && (Symbol.iterator in Object(data)))
     {
-        for(var item of data)
+        for(const item of data)
         {   
-	        if (item.currency===BITCOIN_TICKER)
-            {
-		        btcAvailable = parseFloat(item.available);
-                btcBalance = parseFloat(item.balance);
-            }
-            else if (item.currency===TEZOS_TICKER)
-            {
-	            tezosAvailable = parseFloat(item.available);
-	            tezosBalance = parseFloat(item.balance);
-            }
-			else if (item.currency===ETHEREUM_TICKER)
-            {
-	            ethAvailable = parseFloat(item.available);
-	            ethBalance = parseFloat(item.balance);
+            if(TICKERS[item.currency] !== undefined){
+                TICKERS[item.currency]['Available'] = parseFloat(item.available);
+                TICKERS[item.currency]['Balance'] = parseFloat(item.balance);
+                TICKERS[item.currency]['trading_enabled'] = item.trading_enabled;
+
+                if(TICKERS[item.currency]['Pair'] !== undefined) await publicClient.getProductTicker(CURRENCY_PAIRS[TICKERS[item.currency]['Pair']]['Name'], getGenericProductTickerCallback);
+                await sleep(2000);
+                //console.log(item);
             }
         }
-   
-        console.log("[BITCOIN WALLET] Available: " + btcAvailable.toFixed(8) + " BTC,  Balance: " + btcBalance.toFixed(8) + " BTC");
-        console.log("[TEZOS   WALLET] Available: " + tezosAvailable.toFixed(8) + " XTZ,  Balance: " + tezosBalance.toFixed(8) + " XTZ");
-		console.log("[ETHER   WALLET] Available: " + ethAvailable.toFixed(8) + " ETH,  Balance: " + ethBalance.toFixed(8) + " ETH\n");
 
-		console.log("[INFO] Number of cycles completed: " + numberOfCyclesCompleted + ", estimated profit: " + estimatedProfit.toFixed(8) + " BTC\n");
-
-        publicClient.getProductTicker(XTZ_BTC_CURRENCY_PAIR, getProductTickerCallbackTEZOS);
+        console.table(TICKERS);
+        console.log("[INFO] Number of cycles completed: " + numberOfCyclesCompleted + ", estimated profit: " + estimatedProfit.toFixed(8) + " BTC\n");        
     }
-}
-
-const getFilledPriceCallbackTEZOS = (error, response, data) =>  
-{
-	if (error)
-        return console.log(error);
-
-	if ((Array.isArray(data)) && (data.length >= 1))
-	{
-		lastBuyOrderPriceTEZOS = parseFloat(data[0].price);
-
-		let highestPrice;
-	
-		if (askPriceTEZOS>lastBuyOrderPriceTEZOS)
-		    highestPrice = askPriceTEZOS;
-		else
-		    highestPrice = lastBuyOrderPriceTEZOS;
-
-		const sellPrice = highestPrice * SELL_PRICE_MULTIPLIER;
-
-		const sellSize = tezosAvailable - 0.000000001;
-
-		const sellParams = 
-		{
-		    'price': sellPrice.toFixed(6),
-		    'size': sellSize.toFixed(4),
-		    'product_id': XTZ_BTC_CURRENCY_PAIR,
-		    'post_only': true,
-		};
-
-		console.log("");
-		console.log("\x1b[41m%s\x1b[0m", "[SELL ORDER] Price: " + sellPrice.toFixed(6) + " BTC, size: " + sellSize.toFixed(2) + " XTZ"); 
-
-		setTimeout(()=>authenticatedClient.sell(sellParams, sellOrderCallbackTEZOS), 3000);
-	}
-
-	return console.log(data);
-}
-
-const getFilledPriceCallbackETH = (error, response, data) =>  
-{
-	if (error)
-        return console.log(error);
-
-	if ((Array.isArray(data)) && (data.length >= 1))
-	{
-		lastBuyOrderPriceETH = parseFloat(data[0].price);
-
-		let highestPrice;
-	
-		if (askPriceETH>lastBuyOrderPriceETH)
-		    highestPrice = askPriceETH;
-		else
-		    highestPrice = lastBuyOrderPriceETH;
-
-		const sellPrice = highestPrice * SELL_PRICE_MULTIPLIER;
-
-		const sellSize = ethAvailable - 0.000000001;
-
-		const sellParams = 
-		{
-		    'price': sellPrice.toFixed(5),
-		    'size': sellSize.toFixed(8),
-		    'product_id': ETH_BTC_CURRENCY_PAIR,
-		    'post_only': true,
-		};
-
-		console.log("");
-		console.log("\x1b[41m%s\x1b[0m", "[SELL ORDER] Price: " + sellPrice.toFixed(6) + " BTC, size: " + sellSize.toFixed(2) + " ETH"); 
-
-		setTimeout(()=>authenticatedClient.sell(sellParams, sellOrderCallbackETH), 3000);
-	}
-
-	return console.log(data);
-}
-
-// Functions
-
-function placeBuyOrderTEZOS() 
-{
-    const minimumBuyPrice = averagePriceTEZOS * MINIMUM_BUY_PRICE_MULTIPLIER;
-
-    if (askPriceTEZOS>=minimumBuyPrice)
-    {
-        const buySize = SEED_XTZ_AMOUNT;
-
-        const buyParams = 
-	    {
-            'size': buySize.toFixed(2),
-            'product_id': XTZ_BTC_CURRENCY_PAIR,
-            'type': 'market'
-		};
-
-		console.log("");
-		console.log("\x1b[42m%s\x1b[0m", "[BUY ORDER] Size: " + buySize.toFixed(2) + " XTZ");
-
-        authenticatedClient.buy(buyParams, buyOrderCallbackTEZOS);
-    }
-}
-
-function placeBuyOrderETH() 
-{
-    const minimumBuyPrice = averagePriceETH * MINIMUM_BUY_PRICE_MULTIPLIER;
-
-    if (askPriceETH>=minimumBuyPrice)
-    {
-        const buySize = SEED_ETH_AMOUNT;
-
-        const buyParams = 
-	    {
-            'size': buySize.toFixed(2),
-            'product_id': ETH_BTC_CURRENCY_PAIR,
-            'type': 'market'
-		};
-
-		console.log("");
-		console.log("\x1b[42m%s\x1b[0m", "[BUY ORDER] Size: " + buySize.toFixed(2) + " ETH");
-
-        authenticatedClient.buy(buyParams, buyOrderCallbackETH);
-    }
-}
-
-function placeSellOrderTEZOS()
-{
-	const params = 
-	{
-    	order_id: lastBuyOrderIdTEZOS
-	};
-
-	authenticatedClient.getFills(params, getFilledPriceCallbackTEZOS);
-}
-
-function placeSellOrderETH()
-{
-	const params = 
-	{
-    	order_id: lastBuyOrderIdETH
-	};
-
-	authenticatedClient.getFills(params, getFilledPriceCallbackETH);
 }
 
 // Main logic
-
 console.log("\n");
 console.log("          __________  ___   _  __    ______               ___");
 console.log("         / ____/ __ \\/   | | |/ /   /_  __/________ _____/ (_)___  ____ _");
@@ -378,28 +259,46 @@ console.log("\n\n\n\n                    \"The Revolution Will Be Decentralized\
 
 console.log("\n\n\n\nConnecting to Coinbase Pro in " + parseInt(SLEEP_TIME/1000) + " seconds ..."); 
 
-setInterval(() => 
+/* just once upon a time */
+TICKERS['BTC'] = {
+    Pair: undefined,
+    Available : 0,
+    Balance : 0,
+    trading_enabled : false
+};
+
+for(var x in CURRENCY_PAIRS){
+    var c1 = x.split('_')[0];
+
+    TICKERS[c1] = {
+        Pair: x,
+        askPrice : null,
+        Price : null,
+        Available : 0,
+        Balance : 0,
+        trading_enabled : false,
+        lastBuyOrderId: null,
+        averagePrice: null
+    };
+}
+
+/* every X miliseconds */
+setInterval(async () => 
 {
     console.log('\n\n');
-
-    askPriceTEZOS = null;
-	askPriceETH = null;
     
-    btcAvailable = 0;
-    btcBalance = 0;
-
-    tezosAvailable = 0;
-    tezosBalance = 0;
-
-    ethAvailable = 0;
-    ethBalance = 0;
+    //set to default each time
+    for(var x in CURRENCY_PAIRS){
+        var c1 = x.split('_')[0];        
+            //TICKERS[c1]['askPrice'] = null;
+            TICKERS[c1]['Available'] = 0;
+            TICKERS[c1]['Balance'] = 0;
+    }
 
     publicClient = new GdaxModule.PublicClient(GDAX_URI); 
     authenticatedClient = new GdaxModule.AuthenticatedClient(KEY, SECRET, PASSPHRASE, GDAX_URI);
 
     // Get the balance of the wallets and execute the trading strategy
-    authenticatedClient.getAccounts(getAccountsCallback);
+    await authenticatedClient.getAccounts(getAccountsCallback);
 
 }, SLEEP_TIME);
-
-

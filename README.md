@@ -1,6 +1,6 @@
 # GDAX Trading Bot
 
-This program is an automated trading system that can autonomously trade the XTZ / BTC and ETH / BTC pairs in the Coinbase Pro exchange. 
+This program is an automated trading system that can autonomously trade several currency pairs in the Coinbase Pro exchange. 
 
 Keep in mind that trading is a risky activity that can involve a loss of money. You should only invest the amount you can afford to lose.
 
@@ -10,7 +10,7 @@ The trading strategy consists of issuing a large number of low value orders. The
 
 ### The seed
 
-The seed is the amount of each coin that the program will trade continuously to earn bitcoins. The greater the seed, the greater the benefit. The seed values must be set in the program variables SEED_XTZ_AMOUNT and SEED_ETH_AMOUNT.
+The seed is the amount of each coin that the program will trade continuously to earn bitcoins. The greater the seed, the greater the benefit. The seed values must be set for each currency pair in the program variable `CURRENCY_PAIRS`.
 
 You should be able to buy at least 10 seeds of each coin with your initial bitcoin balance. The more seeds you can buy, the easier it will be to recover from a losing streak.
 
@@ -35,7 +35,7 @@ Generate an API Key only with trade permission (https://pro.coinbase.com/profile
 
 ### Environment variables
 
-Save the three values of the API key in the following environment variables of the operating system:
+Save the three values of the API key in the following environment variables of the operating system (or your .env file):
 
 - TRADING_BOT_PASSPHRASE
 - TRADING_BOT_KEY
@@ -51,7 +51,7 @@ Save the three values of the API key in the following environment variables of t
 ### Configuration
 
 - Open the file "index.js" with a text editor
-- Set the seeds in the variables SEED_XTZ_AMOUNT and SEED_ETH_AMOUNT
+- Set the seeds in the variable `CURRENCY_PAIRS`
 
 ### Execution
 
@@ -61,6 +61,6 @@ Save the three values of the API key in the following environment variables of t
 
 ## Donations
 
-Please consider making a donation to the following Monero address:
+Please consider making a donation to the following Coinbase Bitcoin Wallet address (BTC):
 
-48UKr19MznsFVurfcYmR92WubUYTT3TCMFgfk5oF1qK9bcefjrqYEwicDCi9ZyP5ABefDbCyAdg7d4Q8Mf2Kys1YT5K2CVc
+1JoVYW4bvz1NXUmHeEPVniArfWYdWWE6n8

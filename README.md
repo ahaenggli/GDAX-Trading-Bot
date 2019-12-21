@@ -2,6 +2,14 @@
 
 This program is an automated trading system that can autonomously trade several currency pairs in the Coinbase Pro exchange. 
 
+* LTC_BTC : {Name:'LTC-BTC',Rounding:6,SEED_AMOUNT:1.00},
+* ETH_BTC : {Name:'ETH-BTC',Rounding:5,SEED_AMOUNT:1.00},
+* XLM_BTC : {Name:'XLM-BTC',Rounding:8,SEED_AMOUNT:1.00},
+* EOS_BTC : {Name:'EOS-BTC',Rounding:6,SEED_AMOUNT:1.00},
+* ZRX_BTC : {Name:'ZRX-BTC',Rounding:8,SEED_AMOUNT:1.00},
+* ETC_BTC : {Name:'ETC-BTC',Rounding:6,SEED_AMOUNT:1.00},
+* XTZ_BTC : {Name:'XTZ-BTC',Rounding:8,SEED_AMOUNT:1.00}
+
 Keep in mind that trading is a risky activity that can involve a loss of money. You should only invest the amount you can afford to lose.
 
 ## Trading strategy

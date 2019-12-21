@@ -1,16 +1,15 @@
 #!/usr/bin/env node
-
 /*
  ============================================================================
  Name        : GDAX Trading Bot
  Author      : Kenshiro, ahaenggli
- Version     : 8.00
+ Version     : 8.01
  Copyright   : GNU General Public License (GPLv3)
  Description : Trading bot for the Coinbase Pro exchange
  ============================================================================
  */
-
-const APP_VERSION = "v8.00";
+'use strict';
+const APP_VERSION = "v8.01";
 
 const GdaxModule = require('coinbase-pro');
 
@@ -36,9 +35,9 @@ const CURRENCY_PAIRS =
 {
     LTC_BTC : {Name:'LTC-BTC',Rounding:6,SEED_AMOUNT:1.00},
     ETH_BTC : {Name:'ETH-BTC',Rounding:5,SEED_AMOUNT:1.00},
-    //XLM_BTC : {Name:'XLM-BTC',Rounding:8,SEED_AMOUNT:100.00},
-    //EOS_BTC : {Name:'EOS-BTC',Rounding:6,SEED_AMOUNT:1.00},
-    //ZRX_BTC : {Name:'ZRX-BTC',Rounding:8,SEED_AMOUNT:10.00},
+    XLM_BTC : {Name:'XLM-BTC',Rounding:8,SEED_AMOUNT:1.00},
+    EOS_BTC : {Name:'EOS-BTC',Rounding:6,SEED_AMOUNT:1.00},
+    ZRX_BTC : {Name:'ZRX-BTC',Rounding:8,SEED_AMOUNT:1.00},
     ETC_BTC : {Name:'ETC-BTC',Rounding:6,SEED_AMOUNT:1.00},
     XTZ_BTC : {Name:'XTZ-BTC',Rounding:8,SEED_AMOUNT:1.00}
 };
@@ -63,13 +62,13 @@ const sellOrderCallbackGeneric = async(error, response, data) =>
 
     if ((data!=null) && (data.status==='pending'))
     {
-        myProduct = data.product_id;
-        myKey = myProduct.replace('-','_');
+        var myProduct = data.product_id;
+        var myKey = myProduct.replace('-','_');
         var cur = myProduct.split('-')[0];
         var btc = myProduct.split('-')[1];
 
         estimatedProfit = estimatedProfit + CURRENCY_PAIRS[myKey]['SEED_AMOUNT'] * (parseFloat(data.price) - TICKERS[cur]['lastBuyOrderPrice']);
-		averagePriceTEZOS = TICKERS[cur]['lastBuyOrderPrice'];          
+		TICKERS[cur]['averagePrice'] = TICKERS[cur]['lastBuyOrderPrice'];          
         TICKERS[cur]['lastBuyOrderPrice'] = null;
         TICKERS[cur]['lastBuyOrderId'] = null;
         numberOfCyclesCompleted++;
@@ -85,13 +84,13 @@ const getFilledPriceCallbackGeneric = async(error, response, data) =>
 
 	if ((Array.isArray(data)) && (data.length >= 1))
 	{
-        myProduct = data[0].product_id;
-        myKey = myProduct.replace('-','_');
+        var myProduct = data[0].product_id;
+        var myKey = myProduct.replace('-','_');
         
         var cur = myProduct.split('-')[0];
         var btc = myProduct.split('-')[1];
         
-        TICKERS[cur].lastBuyOrderPrice = null;
+        TICKERS[cur]['lastBuyOrderPrice']  = null;
 		TICKERS[cur]['lastBuyOrderPrice'] = parseFloat(data[0].price);
 
 		let highestPrice;
@@ -183,7 +182,7 @@ const getGenericProductTickerCallback = async (error, response, data) =>
         var myTicker = (response['request']['href']);
         myTicker = myTicker.replace('https://api.pro.coinbase.com/products/', '');
         myTicker = myTicker.replace('/ticker', '');
-        myTickerKey = myTicker.replace('-', '_');
+        var myTickerKey = myTicker.replace('-', '_');
 
         var cur = myTicker.split('-')[0];
         var btc = myTicker.split('-')[1];
@@ -230,8 +229,14 @@ const getAccountsCallback = async (error, response, data) =>
                 TICKERS[item.currency]['Balance'] = parseFloat(item.balance);
                 TICKERS[item.currency]['trading_enabled'] = item.trading_enabled;
 
-                if(TICKERS[item.currency]['Pair'] !== undefined) await publicClient.getProductTicker(CURRENCY_PAIRS[TICKERS[item.currency]['Pair']]['Name'], getGenericProductTickerCallback);
-                await sleep(2000);
+                if(TICKERS[item.currency]['Pair'] !== undefined // is it pair i wanna trade? 
+                    && TICKERS[item.currency]['trading_enabled']  // is trading enabled?
+                    && CURRENCY_PAIRS[TICKERS[item.currency]['Pair']]['SEED_AMOUNT'] > 0) // did i configure bigger 0? 
+                    {
+                        await publicClient.getProductTicker(CURRENCY_PAIRS[TICKERS[item.currency]['Pair']]['Name'], getGenericProductTickerCallback);
+                        // wait for 1 second (because of API limitations...)
+                        await sleep(1000);
+                    }                
                 //console.log(item);
             }
         }
@@ -269,11 +274,10 @@ TICKERS['BTC'] = {
 
 for(var x in CURRENCY_PAIRS){
     var c1 = x.split('_')[0];
-
+    if(CURRENCY_PAIRS[x].SEED_AMOUNT > 0)
     TICKERS[c1] = {
         Pair: x,
         askPrice : null,
-        Price : null,
         Available : 0,
         Balance : 0,
         trading_enabled : false,
@@ -289,10 +293,12 @@ setInterval(async () =>
     
     //set to default each time
     for(var x in CURRENCY_PAIRS){
+        if(CURRENCY_PAIRS[x].SEED_AMOUNT > 0){
         var c1 = x.split('_')[0];        
-            //TICKERS[c1]['askPrice'] = null;
+            TICKERS[c1]['askPrice'] = null;
             TICKERS[c1]['Available'] = 0;
             TICKERS[c1]['Balance'] = 0;
+        }
     }
 
     publicClient = new GdaxModule.PublicClient(GDAX_URI); 
